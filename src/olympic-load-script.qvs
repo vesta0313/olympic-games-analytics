@@ -1,0 +1,1048 @@
+///$tab 00_Settings
+SET ThousandSep=',';
+SET DecimalSep='.';
+SET MoneyThousandSep=',';
+SET MoneyDecimalSep='.';
+SET MoneyFormat='$ ###0.00;-$ ###0.00';
+SET TimeFormat='h:mm:ss TT';
+SET DateFormat='M/D/YYYY';
+SET TimestampFormat='M/D/YYYY h:mm:ss[.fff] TT';
+SET FirstWeekDay=6;
+SET BrokenWeeks=1;
+SET ReferenceDay=0;
+SET FirstMonthOfYear=1;
+SET CollationLocale='en-US';
+SET CreateSearchIndexOnReload=1;
+SET MonthNames='Jan;Feb;Mar;Apr;May;Jun;Jul;Aug;Sep;Oct;Nov;Dec';
+SET LongMonthNames='January;February;March;April;May;June;July;August;September;October;November;December';
+SET DayNames='Mon;Tue;Wed;Thu;Fri;Sat;Sun';
+SET LongDayNames='Monday;Tuesday;Wednesday;Thursday;Friday;Saturday;Sunday';
+SET NumericalAbbreviation='3:k;6:M;9:G;12:T;15:P;18:E;21:Z;24:Y;-3:m;-6:μ;-9:n;-12:p;-15:f;-18:a;-21:z;-24:y';
+// Project scope and reusable variables
+LET vMinOlympicYear = 1896;
+LET vMaxOlympicYear = 2024;
+SET vUnknownLabel = 'Unknown';
+///$tab 01_Source
+// Raw source layer: one record per supplied source row
+RawOlympics:
+LOAD
+    RecNo() AS [_SourceRowNumber],
+    [unknown_id],
+    [id],
+    [used_name],
+    [full_name],
+    [gender],
+    [height_in_cm],
+    [weight_in_kg],
+    [birth_date],
+    [birth_date_Olympedia],
+    [age],
+    [age_Olympedia],
+    [death_date],
+    [birth_country],
+    [birth_country_Olympedia],
+    [birth_country_full],
+    [birth_country_full_Olympedia],
+    [birth_country_full (2024 imported too)],
+    [birth_region_2024],
+    [birth_region_Olympedia],
+    [birth_city_Olympedia],
+    [latitude],
+    [longitude],
+    [year],
+    [sport],
+    [team],
+    [gapminder_countryname],
+    [event],
+    [medal],
+    [place],
+    [tied],
+    [season],
+    [event_unmodified],
+    [GDP per capita, PPP (constant 2021 international $)],
+    [GDP total, PPP (constant 2021 international $)],
+    [GDP per capita growth (%)],
+    [Population],
+    [Gini],
+    [Roles],
+    [Born],
+    [Died],
+    [NOC],
+    [Affiliations],
+    [Nick/petnames],
+    [Title(s)],
+    [Other names],
+    [Nationality],
+    [Original name],
+    [Name order]
+FROM [lib://DataFiles/Olympic_Athletes_&_Global_Inequality_(1896-2024).xlsx]
+(ooxml, embedded labels, table is Sheet1);
+///$tab 02_Staging
+// Clean and rename source fields before building the star schema
+StgOlympics:
+NoConcatenate
+LOAD
+    [_SourceRowNumber] AS SourceRowNumber,
+    [unknown_id] AS SourceRecordID,
+    [id] AS AthleteID,
+
+    If(Len(Trim([used_name])) = 0, Null(), Trim([used_name])) AS AthleteUsedName,
+    If(Len(Trim([full_name])) = 0, Null(), Trim([full_name])) AS AthleteFullName,
+    If(Len(Trim([gender])) = 0, Null(), Trim([gender])) AS Gender,
+
+    If(IsNum([height_in_cm]), [height_in_cm], Null()) AS AthleteHeightCm,
+    If(IsNum([weight_in_kg]), [weight_in_kg], Null()) AS AthleteWeightKg,
+
+    [birth_date] AS BirthDateSource,
+    [birth_date_Olympedia] AS BirthDateOlympediaSource,
+    If(IsNum([age]), [age], Null()) AS ReportedAge,
+    If(IsNum([age_Olympedia]), [age_Olympedia], Null()) AS OlympediaAge,
+    [death_date] AS DeathDateSource,
+
+    [birth_country] AS BirthCountryCode,
+    [birth_country_Olympedia] AS BirthCountryCodeOlympedia,
+    [birth_country_full] AS BirthCountry,
+    [birth_country_full_Olympedia] AS BirthCountryOlympedia,
+    [birth_country_full (2024 imported too)] AS BirthCountry2024,
+    [birth_region_2024] AS BirthRegion2024,
+    [birth_region_Olympedia] AS BirthRegionOlympedia,
+    [birth_city_Olympedia] AS BirthCityOlympedia,
+
+    If(IsNum([latitude]), [latitude], Null()) AS BirthLatitude,
+    If(IsNum([longitude]), [longitude], Null()) AS BirthLongitude,
+
+    Floor([year]) AS OlympicYear,
+    Trim([sport]) AS Sport,
+    Trim([team]) AS Team,
+    Trim([gapminder_countryname]) AS GapminderCountryName,
+    Trim([event]) AS Event,
+
+    If(Len(Trim([medal])) = 0 or Trim([medal]) = '-', Null(), Trim([medal])) AS Medal,
+    If(IsNum([place]), Floor([place]), Null()) AS Place,
+    [tied] AS Tied,
+    Trim([season]) AS Season,
+    Trim([event_unmodified]) AS EventUnmodified,
+
+    If(IsNum([GDP per capita, PPP (constant 2021 international $)]),
+        [GDP per capita, PPP (constant 2021 international $)], Null()) AS GDPPerCapitaPPP,
+
+    If(IsNum([GDP total, PPP (constant 2021 international $)]),
+        [GDP total, PPP (constant 2021 international $)], Null()) AS GDPTotalPPP,
+
+    If(IsNum([GDP per capita growth (%)]),
+        [GDP per capita growth (%)], Null()) AS GDPPerCapitaGrowthPct,
+
+    If(IsNum([Population]), [Population], Null()) AS Population,
+    If(IsNum([Gini]), [Gini], Null()) AS Gini,
+
+    [Roles],
+    [Born],
+    [Died],
+    [NOC],
+    [Affiliations],
+    [Nick/petnames] AS NickPetNames,
+    [Title(s)] AS Titles,
+    [Other names] AS OtherNames,
+    [Nationality],
+    [Original name] AS OriginalName,
+    [Name order] AS NameOrder
+
+RESIDENT RawOlympics
+WHERE [year] >= $(vMinOlympicYear)
+  AND [year] <= $(vMaxOlympicYear);
+
+// Raw table is no longer needed after cleaning
+DROP TABLE RawOlympics;
+///$tab 03_HostSource
+// Additional open data source: Olympic Games hosts
+// Source: Petro Ivaniuk, Olympic Games Hosts, Kaggle
+// Original information scraped from the official Olympics website
+
+RawHosts:
+NoConcatenate
+LOAD
+    RecNo() AS HostSourceRowID,
+    [Type] AS HostSourceType,
+    [GamesUrl] AS HostSourceURL,
+    Trim([Country]) AS HostCountrySource,
+    Trim([City]) AS HostCitySource,
+    Num([Year]) AS HostSourceYear
+FROM [lib://DataFiles/olympic_hosts.csv]
+(txt, utf8, embedded labels, delimiter is ',', msq)
+WHERE Match([Type], 'summergames', 'wintergames')
+    AND [Year] >= $(vMinOlympicYear)
+    AND [Year] <= $(vMaxOlympicYear);
+///$tab 04_HostStaging
+// Clean and standardise the Olympic host source
+
+StgHosts:
+NoConcatenate
+LOAD
+    HostSourceRowID,
+    HostSourceYear AS HostYear,
+
+    If(
+        HostSourceType = 'summergames',
+        'Summer Olympics',
+        'Winter Olympics'
+    ) AS HostSeason,
+
+    HostCountrySource AS HostCountry,
+    HostCitySource AS HostCity,
+    HostSourceURL
+RESIDENT RawHosts;
+
+DROP TABLE RawHosts;
+///$tab 05_DimGames
+// Convert host country names into the Olympic team codes
+// used by the provided dataset
+
+MapHostCountryToTeam:
+MAPPING LOAD * INLINE [
+HostCountry, HostTeamCode
+Greece, GRE
+France, FRA
+United States of America, USA
+Great Britain, GBR
+Sweden, SWE
+Belgium, BEL
+Switzerland, SUI
+Netherlands, NED
+Germany, GER
+Finland, FIN
+Norway, NOR
+Australia, AUS
+Italy, ITA
+Austria, AUT
+Japan, JPN
+Mexico, MEX
+Canada, CAN
+USSR, URS
+Yugoslavia, YUG
+Republic of Korea, KOR
+Spain, ESP
+People's Republic of China, CHN
+Russian Federation, RUS
+Brazil, BRA
+];
+
+// Prepare the normal Summer and Winter host records
+
+HostGamesNormalized:
+NoConcatenate
+LOAD
+    HostYear AS GamesYear,
+    HostSeason AS GamesSeason,
+    HostCountry,
+    HostCity,
+
+    If(
+        HostYear = 1972 and HostCountry = 'Germany',
+        'FRG',
+        ApplyMap(
+            'MapHostCountryToTeam',
+            HostCountry,
+            Null()
+        )
+    ) AS HostTeamCode,
+
+    HostSourceURL
+RESIDENT StgHosts
+WHERE NOT (
+    HostYear = 1956
+    and HostSeason = 'Summer Olympics'
+);
+
+// The 1956 Summer Games were divided between
+// Melbourne and Stockholm
+
+CONCATENATE (HostGamesNormalized)
+LOAD
+    HostYear AS GamesYear,
+    'Summer Olympics' AS GamesSeason,
+    Trim(SubField(HostCountry, ',', 1)) AS HostCountry,
+    Trim(SubField(HostCity, ' - ', 1)) AS HostCity,
+    'AUS' AS HostTeamCode,
+    HostSourceURL
+RESIDENT StgHosts
+WHERE HostYear = 1956
+    AND HostSeason = 'Summer Olympics';
+
+CONCATENATE (HostGamesNormalized)
+LOAD
+    HostYear AS GamesYear,
+    'Equestrian Olympics' AS GamesSeason,
+    Trim(SubField(HostCountry, ',', 2)) AS HostCountry,
+    Trim(SubField(HostCity, ' - ', 2)) AS HostCity,
+    'SWE' AS HostTeamCode,
+    HostSourceURL
+RESIDENT StgHosts
+WHERE HostYear = 1956
+    AND HostSeason = 'Summer Olympics';
+
+// Create one unique row for every Games edition
+
+DimGames_Temp:
+NoConcatenate
+LOAD DISTINCT
+    AutoNumberHash128(OlympicYear, Season) AS [%GamesKey],
+    OlympicYear AS GamesYear,
+    Season AS GamesSeason
+RESIDENT StgOlympics;
+
+// Add the host information to the Games dimension
+
+LEFT JOIN (DimGames_Temp)
+LOAD
+    GamesYear,
+    GamesSeason,
+    HostCountry,
+    HostCity,
+    HostTeamCode,
+    HostSourceURL
+RESIDENT HostGamesNormalized;
+
+// Create the final Games dimension
+
+DimGames:
+NoConcatenate
+LOAD
+    [%GamesKey],
+    GamesYear,
+    GamesSeason,
+
+    // Keep the original season and add a grouping for Summer/Winter analysis.
+    // The equestrian events held in Stockholm were part of the 1956 Summer Games.
+    // The 1906 Intercalated Games remain in the model as Other Games.
+    If(
+        GamesSeason = 'Equestrian Olympics',
+        'Summer Olympics',
+        If(
+            Match(
+                GamesSeason,
+                'Summer Olympics',
+                'Winter Olympics'
+            ),
+            GamesSeason,
+            'Other Games'
+        )
+    ) AS AnalysisSeason,
+
+    // Identifies editions included in standard Summer/Winter comparisons.
+    If(
+        Match(
+            GamesSeason,
+            'Summer Olympics',
+            'Winter Olympics',
+            'Equestrian Olympics'
+        ),
+        1,
+        0
+    ) AS StandardGamesFlag,
+
+    GamesYear & ' ' & GamesSeason AS GamesLabel,
+    HostCountry,
+    HostCity,
+    HostTeamCode,
+    HostSourceURL,
+
+    If(
+        IsNull(HostCountry)
+        or Len(Trim(HostCountry)) = 0,
+        0,
+        1
+    ) AS HostDataAvailable
+
+RESIDENT DimGames_Temp;
+
+// Remove temporary tables
+
+DROP TABLE DimGames_Temp;
+DROP TABLE HostGamesNormalized;
+DROP TABLE StgHosts;
+///$tab 06_DimEvent
+// Create one unique dimension row for every sport and event
+// Sport and event are both used because event names are not unique alone
+
+DimEvent_Temp:
+NoConcatenate
+LOAD DISTINCT
+    AutoNumberHash128(SportName, EventName) AS [%EventKey],
+    SportName,
+    EventName,
+    SportName & ' | ' & EventName AS SportEventLabel;
+LOAD
+    If(
+        Len(Trim(Sport)) = 0,
+        '$(vUnknownLabel)',
+        Trim(Sport)
+    ) AS SportName,
+
+    If(
+        Len(Trim(Event)) = 0,
+        '$(vUnknownLabel)',
+        Trim(Event)
+    ) AS EventName
+RESIDENT StgOlympics;
+
+// Create the final event dimension
+
+DimEvent:
+NoConcatenate
+LOAD
+    [%EventKey],
+    SportName,
+    EventName,
+    SportEventLabel
+RESIDENT DimEvent_Temp;
+
+DROP TABLE DimEvent_Temp;
+///$tab 07_DimCountryYear
+// Create one row for every country and Olympic year.
+// Economic values are stored here instead of being repeated for every athlete.
+
+DimCountryYear_Temp:
+NoConcatenate
+LOAD
+    AutoNumberHash128(Team, OlympicYear) AS [%CountryYearKey],
+    Team AS TeamCode,
+    OlympicYear AS CountryYear,
+
+    If(
+        Len(Trim(MaxString(GapminderCountryName))) = 0,
+        '$(vUnknownLabel)',
+        Trim(MaxString(GapminderCountryName))
+    ) AS CountryName,
+
+    Round(Max(GDPPerCapitaPPP), 0.01) AS GDPPerCapitaPPP,
+    Round(Max(GDPTotalPPP), 1) AS GDPTotalPPP,
+    Round(Max(GDPPerCapitaGrowthPct), 0.000001) AS GDPPerCapitaGrowthPct,
+    Round(Max(Population), 1) AS Population,
+    Round(Max(Gini), 0.0001) AS Gini,
+
+    Count(DISTINCT Round(GDPPerCapitaPPP, 0.01))
+        AS GDPPerCapitaValueCount,
+
+    Count(DISTINCT Round(GDPTotalPPP, 1))
+        AS GDPTotalValueCount,
+
+    Count(DISTINCT Round(GDPPerCapitaGrowthPct, 0.000001))
+        AS GDPGrowthValueCount,
+
+    Count(DISTINCT Round(Population, 1))
+        AS PopulationValueCount,
+
+    Count(DISTINCT Round(Gini, 0.0001))
+        AS GiniValueCount
+
+RESIDENT StgOlympics
+GROUP BY Team, OlympicYear;
+
+
+// Qlik does not consistently locate the source names used for these countries
+// Their ISO country codes are used only for map positioning
+// CountryName remains unchanged for labels and filters
+
+MapTeamCodeToCountryLocation:
+MAPPING LOAD * INLINE [
+TeamCode, CountryLocation
+COD, COD
+MKD, MKD
+];
+
+
+// Create the final country-year dimension.
+// Availability flags support reliable filtering in economic analyses
+
+DimCountryYear:
+NoConcatenate
+LOAD
+    [%CountryYearKey],
+    TeamCode,
+    CountryName,
+
+    ApplyMap(
+        'MapTeamCodeToCountryLocation',
+        TeamCode,
+        CountryName
+    ) AS MapCountryLocation,
+
+    CountryYear,
+
+    GDPPerCapitaPPP AS CountryGDPPerCapitaPPP,
+    GDPTotalPPP AS CountryGDPTotalPPP,
+    GDPPerCapitaGrowthPct AS CountryGDPPerCapitaGrowthPct,
+    Population AS CountryPopulation,
+    Gini AS CountryGini,
+
+    If(IsNull(GDPPerCapitaPPP), 0, 1) AS HasGDPData,
+    If(IsNull(Population), 0, 1) AS HasPopulationData,
+    If(IsNull(Gini), 0, 1) AS HasGiniData,
+
+    If(
+        GDPPerCapitaValueCount > 1
+        or GDPTotalValueCount > 1
+        or GDPGrowthValueCount > 1
+        or PopulationValueCount > 1
+        or GiniValueCount > 1,
+        1,
+        0
+    ) AS EconomicDataConflictFlag
+
+RESIDENT DimCountryYear_Temp;
+
+DROP TABLE DimCountryYear_Temp;
+///$tab 08_DimAthlete
+// Prepare a stable identifier for every athlete
+// Source row number is used when the athlete ID is missing
+
+AthleteRecords_Temp:
+NoConcatenate
+LOAD
+    If(
+        IsNull(AthleteID)
+        or Len(Trim(Text(AthleteID))) = 0,
+        'Missing_' & SourceRowNumber,
+        Text(AthleteID)
+    ) AS AthleteNaturalID,
+
+    AthleteID,
+    AthleteUsedName,
+    AthleteFullName,
+    Gender,
+    AthleteHeightCm,
+    AthleteWeightKg,
+    BirthDateSource,
+    BirthCountry,
+    BirthCountryOlympedia,
+    BirthCountry2024,
+    BirthRegion2024,
+    BirthRegionOlympedia,
+    BirthCityOlympedia
+
+RESIDENT StgOlympics;
+
+// Create one row for every athlete
+
+DimAthlete_Temp:
+NoConcatenate
+LOAD
+    AutoNumberHash128(AthleteNaturalID) AS [%AthleteKey],
+    AthleteNaturalID,
+    Max(AthleteID) AS OriginalAthleteID,
+    MaxString(AthleteUsedName) AS UsedName,
+    MaxString(AthleteFullName) AS FullName,
+    MaxString(Gender) AS AthleteGender,
+    Max(AthleteHeightCm) AS HeightCm,
+    Max(AthleteWeightKg) AS WeightKg,
+    MaxString(BirthDateSource) AS BirthDateText,
+
+    If(
+        Len(Trim(MaxString(BirthCountry2024))) > 0,
+        MaxString(BirthCountry2024),
+        If(
+            Len(Trim(MaxString(BirthCountryOlympedia))) > 0,
+            MaxString(BirthCountryOlympedia),
+            MaxString(BirthCountry)
+        )
+    ) AS AthleteBirthCountry,
+
+    If(
+        Len(Trim(MaxString(BirthRegion2024))) > 0,
+        MaxString(BirthRegion2024),
+        MaxString(BirthRegionOlympedia)
+    ) AS AthleteBirthRegion,
+
+    MaxString(BirthCityOlympedia) AS AthleteBirthCity,
+
+    Count(DISTINCT AthleteUsedName) AS UsedNameValueCount,
+    Count(DISTINCT Gender) AS GenderValueCount,
+    Count(DISTINCT BirthDateSource) AS BirthDateValueCount,
+    Count(DISTINCT BirthCountry) AS BirthCountryValueCount
+
+RESIDENT AthleteRecords_Temp
+GROUP BY AthleteNaturalID;
+
+// Create the final athlete dimension
+
+DimAthlete:
+NoConcatenate
+LOAD
+    [%AthleteKey],
+    AthleteNaturalID,
+    OriginalAthleteID AS AthleteOriginalID,
+    UsedName AS AthleteNameUsed,
+    FullName AS AthleteNameFull,
+
+    If(
+        Len(Trim(FullName)) = 0,
+        UsedName,
+        FullName
+    ) AS AthleteDisplayName,
+
+    AthleteGender,
+    HeightCm,
+    WeightKg,
+    BirthDateText AS AthleteBirthDateText,
+    AthleteBirthCountry,
+    AthleteBirthRegion,
+    AthleteBirthCity,
+
+    If(
+        UsedNameValueCount > 1
+        or GenderValueCount > 1
+        or BirthDateValueCount > 1
+        or BirthCountryValueCount > 1,
+        1,
+        0
+    ) AS AthleteDataConflictFlag
+
+RESIDENT DimAthlete_Temp;
+
+DROP TABLE DimAthlete_Temp;
+DROP TABLE AthleteRecords_Temp;
+///$tab 09_WorldBankIncome
+// Match World Bank country names to the names used in the Olympic dataset
+
+MapWorldBankCountryName:
+MAPPING LOAD
+    Trim(WorldBankName),
+    Trim(OlympicCountryName)
+INLINE [
+WorldBankName|OlympicCountryName
+Bahamas, The|Bahamas
+Brunei Darussalam|Brunei
+Cabo Verde|Cape Verde
+Côte d'Ivoire|Cote d'Ivoire
+Czechia|Czech Republic
+Egypt, Arab Rep.|Egypt
+Gambia, The|Gambia
+Iran, Islamic Rep.|Iran
+Lao PDR|Lao
+North Macedonia|Macedonia, FYR
+Naoero|Nauru
+Korea, Dem. Rep.|North Korea
+West Bank and Gaza|Palestine
+Puerto Rico (U.S.)|Puerto Rico
+Russian Federation|Russia
+São Tomé and Príncipe|Sao Tome and Principe
+Somalia, Fed. Rep.|Somalia
+Korea, Rep.|South Korea
+Eswatini|Swaziland
+Syrian Arab Republic|Syria
+Taiwan, China|Taiwan
+Türkiye|Turkey
+Venezuela, RB|Venezuela
+Viet Nam|Vietnam
+Yemen, Rep.|Yemen
+Czechoslovakia (former)|Czechoslovakia
+Netherlands Antilles (former)|Netherlands Antilles
+Serbia and Montenegro (former)|Serbia and Montenegro
+USSR (former)|Soviet Union
+Yugoslavia (former)|Yugoslavia
+] (Delimiter is '|');
+
+
+// Convert the annual income columns into country-year rows.
+// Data years 1987–2023 provide classifications for Olympic years 1988–2024.
+
+WorldBankIncome_Raw:
+CrossTable(WorldBankDataYear, WorldBankIncomeCodeRaw, 2)
+LOAD
+    F1 AS WorldBankCountryCode,
+    [Data for calendar year :] AS WorldBankCountryName,
+    [1987],
+    [1988],
+    [1989],
+    [1990],
+    [1991],
+    [1992],
+    [1993],
+    [1994],
+    [1995],
+    [1996],
+    [1997],
+    [1998],
+    [1999],
+    [2000],
+    [2001],
+    [2002],
+    [2003],
+    [2004],
+    [2005],
+    [2006],
+    [2007],
+    [2008],
+    [2009],
+    [2010],
+    [2011],
+    [2012],
+    [2013],
+    [2014],
+    [2015],
+    [2016],
+    [2017],
+    [2018],
+    [2019],
+    [2020],
+    [2021],
+    [2022],
+    [2023]
+FROM [lib://DataFiles/OGHIST_2026_07_15.xlsx]
+(ooxml, embedded labels, header is 4 lines,
+table is [Country Analytical History]);
+
+
+// World Bank classifications published during an Olympic year use the
+// previous calendar year's GNI data, so the source year is moved forward by one.
+
+WorldBankIncome_Clean:
+NoConcatenate
+LOAD
+    WorldBankCountryCode,
+
+    If(
+        WorldBankCountryName = 'Germany'
+        and Num#(WorldBankDataYear, '0000') + 1 <= 1989,
+        'Federal Republic of Germany',
+        ApplyMap(
+            'MapWorldBankCountryName',
+            WorldBankCountryName,
+            WorldBankCountryName
+        )
+    ) AS CountryName,
+
+    Num#(WorldBankDataYear, '0000')
+        AS WorldBankIncomeDataYear,
+
+    Num#(WorldBankDataYear, '0000') + 1
+        AS CountryYear,
+
+    If(
+        Left(Upper(Trim(WorldBankIncomeCodeRaw)), 2) = 'LM',
+        'LM',
+        Upper(Trim(WorldBankIncomeCodeRaw))
+    ) AS WorldBankIncomeCode
+
+RESIDENT WorldBankIncome_Raw
+WHERE Len(Trim(WorldBankCountryCode)) > 0
+    AND Match(
+        Upper(Trim(WorldBankIncomeCodeRaw)),
+        'L',
+        'LM',
+        'LM*',
+        'UM',
+        'H'
+    );
+
+
+// Add the classification, display order and high-income flag
+// to the existing country-year dimension.
+
+LEFT JOIN (DimCountryYear)
+LOAD
+    CountryName,
+    CountryYear,
+    WorldBankCountryCode,
+    WorldBankIncomeDataYear,
+    WorldBankIncomeCode,
+
+    Dual(
+        Pick(
+            Match(WorldBankIncomeCode, 'L', 'LM', 'UM', 'H'),
+            'Low income',
+            'Lower middle income',
+            'Upper middle income',
+            'High income'
+        ),
+        Match(WorldBankIncomeCode, 'L', 'LM', 'UM', 'H')
+    ) AS WorldBankIncomeGroup,
+
+    Match(
+        WorldBankIncomeCode,
+        'L',
+        'LM',
+        'UM',
+        'H'
+    ) AS WorldBankIncomeGroupOrder,
+
+    If(
+        WorldBankIncomeCode = 'H',
+        1,
+        0
+    ) AS WorldBankHighIncomeFlag
+
+RESIDENT WorldBankIncome_Clean;
+
+
+// Create fields used for statistical comparisons and data-quality checks.
+
+DimCountryYear_WithWorldBank:
+NoConcatenate
+LOAD
+    *,
+
+    CountryName
+        & ' (' & TeamCode & ') | '
+        & Num(CountryYear, '0000')
+        AS CountryYearLabel,
+
+    If(
+        CountryYear >= 1988
+        and CountryYear <= $(vMaxOlympicYear),
+        1,
+        0
+    ) AS WorldBankIncomePeriodFlag,
+
+    If(
+        IsNull(WorldBankIncomeGroup),
+        0,
+        1
+    ) AS HasWorldBankIncomeData
+
+RESIDENT DimCountryYear;
+
+DROP TABLE DimCountryYear;
+RENAME TABLE DimCountryYear_WithWorldBank TO DimCountryYear;
+
+DROP TABLE WorldBankIncome_Raw;
+DROP TABLE WorldBankIncome_Clean;
+///$tab 10_GDPQuartiles
+// Calculate GDP per capita thresholds for each Olympic year
+// Countries are compared with others participating in the same historical period
+
+GDPQuartileThresholds:
+LOAD
+    CountryYear,
+
+    Fractile(
+        CountryGDPPerCapitaPPP,
+        0.25
+    ) AS GDPPerCapitaQ1,
+
+    Fractile(
+        CountryGDPPerCapitaPPP,
+        0.50
+    ) AS GDPPerCapitaMedian,
+
+    Fractile(
+        CountryGDPPerCapitaPPP,
+        0.75
+    ) AS GDPPerCapitaQ3
+
+RESIDENT DimCountryYear
+WHERE HasGDPData = 1
+AND CountryName <> '$(vUnknownLabel)'
+GROUP BY CountryYear;
+
+
+// Prepare the country-year records with available GDP data.
+
+GDPQuartileCountryYear_Temp:
+NoConcatenate
+LOAD
+    [%CountryYearKey],
+    CountryYear,
+    CountryGDPPerCapitaPPP
+RESIDENT DimCountryYear
+WHERE HasGDPData = 1
+AND CountryName <> '$(vUnknownLabel)';
+
+
+// Add thresholds belonging to each Olympic year
+
+LEFT JOIN (GDPQuartileCountryYear_Temp)
+LOAD
+    CountryYear,
+    GDPPerCapitaQ1,
+    GDPPerCapitaMedian,
+    GDPPerCapitaQ3
+RESIDENT GDPQuartileThresholds;
+
+
+// Store each country's relative GDP position
+// Dual keeps the four categories in the intended order
+
+LEFT JOIN (DimCountryYear)
+LOAD
+    [%CountryYearKey],
+
+    Dual(
+        If(
+            CountryGDPPerCapitaPPP <= GDPPerCapitaQ1,
+            'Lowest 25%',
+            If(
+                CountryGDPPerCapitaPPP <= GDPPerCapitaMedian,
+                'Lower middle 25%',
+                If(
+                    CountryGDPPerCapitaPPP <= GDPPerCapitaQ3,
+                    'Upper middle 25%',
+                    'Highest 25%'
+                )
+            )
+        ),
+
+        If(
+            CountryGDPPerCapitaPPP <= GDPPerCapitaQ1,
+            1,
+            If(
+                CountryGDPPerCapitaPPP <= GDPPerCapitaMedian,
+                2,
+                If(
+                    CountryGDPPerCapitaPPP <= GDPPerCapitaQ3,
+                    3,
+                    4
+                )
+            )
+        )
+    ) AS GDPPerCapitaQuartile
+
+RESIDENT GDPQuartileCountryYear_Temp;
+
+
+// Remove the temporary calculation tables.
+
+DROP TABLE GDPQuartileThresholds;
+DROP TABLE GDPQuartileCountryYear_Temp;
+///$tab 11_FactParticipation
+// Connect each Games edition to the team code of its host country
+
+MapGamesHostTeam:
+MAPPING LOAD
+    [%GamesKey],
+    HostTeamCode
+RESIDENT DimGames;
+
+
+// Create the participation fact table
+// One row represents one athlete participating in one event
+
+FactParticipation_Temp:
+NoConcatenate
+LOAD
+    *,
+
+    ApplyMap(
+        'MapGamesHostTeam',
+        [%GamesKey],
+        ''
+    ) AS TempHostTeamCode;
+
+LOAD
+    SourceRowNumber AS ParticipationRecordID,
+    SourceRecordID AS OriginalParticipationRecordID,
+
+    AutoNumberHash128(
+        OlympicYear,
+        Season
+    ) AS [%GamesKey],
+
+    AutoNumberHash128(
+        If(
+            Len(Trim(Sport)) = 0,
+            '$(vUnknownLabel)',
+            Trim(Sport)
+        ),
+        If(
+            Len(Trim(Event)) = 0,
+            '$(vUnknownLabel)',
+            Trim(Event)
+        )
+    ) AS [%EventKey],
+
+    AutoNumberHash128(
+        Team,
+        OlympicYear
+    ) AS [%CountryYearKey],
+
+    AutoNumberHash128(
+        If(
+            IsNull(AthleteID)
+            or Len(Trim(Text(AthleteID))) = 0,
+            'Missing_' & SourceRowNumber,
+            Text(AthleteID)
+        )
+    ) AS [%AthleteKey],
+
+    Team AS TempTeamCode,
+
+    Alt(
+        ReportedAge,
+        OlympediaAge
+    ) AS ParticipationAge,
+
+    Medal AS MedalType,
+    Place AS FinishPlace,
+    Tied AS TiedResult,
+
+    1 AS ParticipationRecordCount,
+
+    If(
+        Match(Medal, 'Gold', 'Silver', 'Bronze'),
+        1,
+        0
+    ) AS MedalRecordFlag,
+
+    If(Medal = 'Gold', 1, 0) AS GoldMedalRecordFlag,
+    If(Medal = 'Silver', 1, 0) AS SilverMedalRecordFlag,
+    If(Medal = 'Bronze', 1, 0) AS BronzeMedalRecordFlag
+
+RESIDENT StgOlympics;
+
+
+// Create the final fact table and remove temporary comparison fields
+
+FactParticipation:
+NoConcatenate
+LOAD
+    ParticipationRecordID,
+    OriginalParticipationRecordID,
+
+    [%GamesKey],
+    [%EventKey],
+    [%CountryYearKey],
+    [%AthleteKey],
+
+    // Keep the original age for traceability
+    // Ages above 73 are excluded from demographic analysis
+    // Oscar Swahn competed at age 72, age 73 keeps historical Olympic art records
+
+    ParticipationAge,
+
+    If(
+        ParticipationAge <= 73,
+        ParticipationAge,
+        Null()
+    ) AS ParticipationAgeForAnalysis,
+
+    If(
+        Not IsNull(ParticipationAge)
+        and ParticipationAge > 73,
+        1,
+        0
+    ) AS AgeDataQualityFlag,
+
+    MedalType,
+    FinishPlace,
+    TiedResult,
+
+    ParticipationRecordCount,
+    MedalRecordFlag,
+    GoldMedalRecordFlag,
+    SilverMedalRecordFlag,
+    BronzeMedalRecordFlag,
+
+    If(
+        Len(Trim(TempHostTeamCode)) > 0
+        and TempTeamCode = TempHostTeamCode,
+        1,
+        0
+    ) AS IsHostCountry
+
+RESIDENT FactParticipation_Temp;
+
+
+// Remove staging tables after the star schema is complete
+
+DROP TABLE FactParticipation_Temp;
+DROP TABLE StgOlympics;
